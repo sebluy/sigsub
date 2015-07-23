@@ -1,0 +1,16 @@
+/target
+/lib
+/classes
+/checkouts
+pom.xml
+*.jar
+*.class
+/.lein-*
+/.env
+*.log
+/resources/public/js
+/out
+.nrepl-port
+.idea
+.repl
+bed_time.iml
