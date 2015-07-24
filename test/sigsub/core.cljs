@@ -30,13 +30,26 @@
                c (signal/make-derived #(@b :important))
                d (signal/make-derived
                    (fn [] (swap! computed inc) (+ @c 1)))]
-              (is (= @computed 0))
+              (is (= @computed 1))
               (swap! a assoc :useless 3)
-              (is (= @computed 0))
+              (is (= @computed 1))
               (is (= @d 2))
               (is (= @computed 1))
               (swap! a assoc :useless 4)
               (is (= @d 2))
               (is (= @computed 1))))
+
+(deftest derived-signal-parent-child-maintained
+         (let [a (atom 1)
+               b (signal/make-base a)
+               c (signal/make-derived #(+ @b 1))
+               d (signal/make-derived #(if (= @b 1) @c 3))]
+              (is (= @d 2))
+              (is (= (.-parents d) #{b c}))
+              (is (= (.-children c) #{d}))
+              (reset! a 2)
+              (is (= @d 3))
+              (is (= (.-parents d) #{b}))
+              (is (= (.-children c) #{}))))
 
 (run-tests)

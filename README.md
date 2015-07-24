@@ -6,9 +6,11 @@ A Clojure library designed to ... well, that part is up to you.
 
 FIXME
 
-## License
+Dependent signals must be dereferenced immedeately upon function call.
+Lazily evaluated signals will not build dependencies properly.
 
-Copyright © 2015 FIXME
+Does not depend on b:
+(signal/make-derived (fn [] (map #(+ @b x) [0 1 2])))
 
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+To fix:
+(signal/make-derived (fn [] (doall (map #(+ @b x) [0 1 2]))))
