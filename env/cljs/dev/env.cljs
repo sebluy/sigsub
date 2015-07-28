@@ -1,5 +1,7 @@
 (ns ^:figwheel-no-load dev.env
-  (:require [figwheel.client :as figwheel]))
+  (:require [figwheel.client :as figwheel]
+            [sigsub.core]
+            [test.sigsub.core]))
 
 (enable-console-print!)
 

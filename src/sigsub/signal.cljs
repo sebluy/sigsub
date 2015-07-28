@@ -1,24 +1,24 @@
-(ns sigsub.signal)
+(ns sigsub.signal
+  (:require [clojure.set :as set]))
 
 (def capturing? false)
-(def signal-being-captured (atom nil))
-(def active-signals {})
-(def default-signal-f nil)
-(def registered-signals {})
+(def captured-parents nil)
+(def signal-being-captured nil)
 
 (declare run-with-deref-capture)
 (declare notify-deref-watcher)
+(declare bind-dependency)
 (declare unbind-dependency)
 
 (defprotocol IParent
              (-add-child [this child])
              (-remove-child [this child])
-             (-notify-children [this]))
+             (-refresh-children [this]))
 
 (defprotocol IChild
+             (-update-parents [this parents])
              (-add-parent [this parent])
-             (-remove-parent [this parent])
-             (-unbind-parents [this]))
+             (-remove-parent [this parent]))
 
 (defprotocol IRunnable
              (-run [this]))
@@ -26,69 +26,66 @@
 (defprotocol IRefreshable
              (-refresh [this]))
 
-(defprotocol IDisposable
-             (-dispose [this]))
+(defprotocol IActivatable
+             (-activate [this])
+             (-deactivate [this]))
 
-(defprotocol ISubscribable
-             (-subscribe [this])
-             (-unsubscribe [this]))
-
-(defprotocol IDirty
-             (-mark-dirty [this]))
-
-(deftype Derived [path f ^:mutable current-value ^:mutable dirty? ^:mutable subscriptions
+; add back in subscription reference count
+(deftype Derived [path f
+                  ^:mutable current-value
+                  ^:mutable active?
                   ^:mutable parents ^:mutable children]
          IDeref
          (-deref [this]
                  (notify-deref-watcher this)
-                 (when dirty?
-                       (-refresh this))
+                 (when-not active?
+                           (-activate this))
                  current-value)
          IRefreshable
          (-refresh [this]
-                   (-unbind-parents this)
-                   (run-with-deref-capture this)
-                   (set! dirty? false))
+                   (println "Refreshing " path)
+                   (let [new-parents (run-with-deref-capture this)]
+                        (-update-parents this new-parents)))
          IRunnable
          (-run [this]
                (let [value (f)]
                     (when-not (= current-value value)
                               (set! current-value value)
-                              (-notify-children this))))
+                              (-refresh-children this))))
          IParent
          (-add-child [this child]
                      (set! children (conj children child)))
          (-remove-child [this child]
-                        (set! children (disj children child)))
-         (-notify-children [this]
-                           (doseq [child children]
-                                  (-mark-dirty child)))
-         IDirty
-         (-mark-dirty [this]
-                      (set! dirty? true))
+                        (set! children (disj children child))
+                        (if (= (count children) 0)
+                          (-deactivate this)))
+         (-refresh-children [this]
+                            (doseq [child children]
+                                   (-refresh child)))
          IChild
+         (-update-parents [this new-parents]
+                          (let [to-remove (set/difference parents new-parents)
+                                to-add (set/difference new-parents parents)]
+                               (doseq [retired-parent to-remove]
+                                      (unbind-dependency retired-parent this))
+                               (doseq [new-parent to-add]
+                                      (bind-dependency new-parent this))))
          (-add-parent [this parent]
                       (set! parents (conj parents parent)))
          (-remove-parent [this parent]
                          (set! parents (disj parents parent)))
-         (-unbind-parents [this]
-                          (doseq [parent parents]
-                                 (unbind-dependency parent this)))
-         ISubscribable
-         (-subscribe [this]
-                     (set! subscriptions (inc subscriptions)))
-         (-unsubscribe [this]
-                       (set! subscriptions (dec subscriptions))
-                       (when (= subscriptions 0)
-                             (-dispose this)))
-         IDisposable
-         (-dispose [this]
-                   (doseq [parent parents]
-                          (-remove-child parent this))
-                   (set! parents nil)
-                   (set! children nil)
-                   (set! current-value nil)
-                   (set! active-signals (dissoc active-signals path))))
+         IActivatable
+         (-activate [this]
+                    (set! active? true)
+                    (set! parents #{})
+                    (set! children #{})
+                    (-refresh this))
+         (-deactivate [this]
+                      (-update-parents this #{})
+                      (set! active? false)
+                      (set! parents nil)
+                      (set! children nil)
+                      (set! current-value nil)))
 
 (deftype Base [parent ^:mutable children]
          IDeref
@@ -100,79 +97,53 @@
                      (set! children (conj children child)))
          (-remove-child [this child]
                         (set! children (disj children child)))
-         (-notify-children [this]
-                           (doseq [child children]
-                                  (-refresh child))))
+         (-refresh-children [this]
+                            (doseq [child children]
+                                   (-refresh child))))
 
 (defn make-base [parent]
       (let [base (Base. parent #{})]
            (-add-watch parent base
                        (fn [_ old-val new-val]
                            (if (not= old-val new-val)
-                             (-notify-children base))))
+                             (-refresh-children base))))
            base))
 
 (defn make-derived [path f]
-      (let [signal (Derived. path f nil true 1 #{} #{})]
-           (set! active-signals (assoc active-signals path signal))
-           signal))
+      (Derived. path f nil false nil nil))
 
 (defn run-with-deref-capture [signal]
       (if capturing?
-        (let [child-signal @signal-being-captured]
-             (reset! signal-being-captured signal)
+        (let [child signal-being-captured
+              childs-captured captured-parents]
+             (set! captured-parents #{})
+             (set! signal-being-captured signal)
              (-run signal)
-             (reset! signal-being-captured child-signal))
-        (do (reset! signal-being-captured signal)
+             (set! signal-being-captured child)
+             (let [captured captured-parents]
+                  (set! captured-parents childs-captured)
+                  captured))
+        (do (set! captured-parents #{})
+            (set! signal-being-captured signal)
             (set! capturing? true)
             (-run signal)
             (set! capturing? false)
-            (reset! signal-being-captured nil))))
+            (set! signal-being-captured nil)
+            (let [captured captured-parents]
+                 (set! captured-parents nil)
+                 captured))))
 
 (defn unbind-dependency [parent child]
+      (println "unbinding " (.-path parent) (.-path child))
       (-remove-parent child parent)
       (-remove-child parent child))
 
 (defn bind-dependency [parent child]
+      (println "binding " (.-path parent) (.-path child))
       (-add-parent child parent)
       (-add-child parent child))
 
 (defn notify-deref-watcher [signal]
-      (if capturing?
-        (bind-dependency signal @signal-being-captured)))
-
-; subscriptions
-
-(defn register-signal [path f]
-      (set! registered-signals (assoc-in registered-signals path f)))
-
-(defn register-default-signal-f [f]
-      (set! default-signal-f f))
-
-(defn get-in-atom-signal-f [atom]
-      (let [base (make-base atom)]
-           (fn [path]
-               (get-in @base path))))
-
-(defn- path->derived-signal-f [path]
-       (loop [node registered-signals path path]
-             (cond (map? node)
-                   (recur (node (first path)) (rest path))
-                   (ifn? node)
-                   (node path))))
-
-(defn path->signal-f [path]
-      (if-let [f (path->derived-signal-f path)]
-              f
-              #(default-signal-f path)))
-
-(defn subscribe [path]
-      (if-let [signal (active-signals path)]
-              (do (-subscribe signal)
-                  signal)
-              (make-derived path (path->signal-f path))))
-
-(defn unsubscribe [signal]
-      (-unsubscribe signal))
-
+      (when capturing?
+            (set! captured-parents (conj captured-parents signal))))
 
