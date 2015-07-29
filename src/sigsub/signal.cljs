@@ -4,21 +4,32 @@
 (def capturing? false)
 (def captured-parents nil)
 (def signal-being-captured nil)
+(def refresh-queue (sorted-map))
+
+(declare path->signal)
+
+(declare enqueue-refresh)
+(declare refresh)
 
 (declare run-with-deref-capture)
 (declare notify-deref-watcher)
 (declare bind-dependency)
 (declare unbind-dependency)
 
+(declare activate-signal)
+(declare deactivate-signal)
+
 (defprotocol IParent
              (-add-child [this child])
-             (-remove-child [this child])
-             (-refresh-children [this]))
+             (-remove-child [this child]))
 
 (defprotocol IChild
              (-update-parents [this parents])
              (-add-parent [this parent])
              (-remove-parent [this parent]))
+
+(defprotocol ISeed
+             (-refresh-children [this]))
 
 (defprotocol IRunnable
              (-run [this]))
@@ -26,20 +37,23 @@
 (defprotocol IRefreshable
              (-refresh [this]))
 
-(defprotocol IActivatable
-             (-activate [this])
-             (-deactivate [this]))
+(defprotocol IDisposable
+             (-dispose [this]))
 
-; add back in subscription reference count
+(defprotocol ISubscribable
+             (-subscribe [this])
+             (-unsubscribe [this]))
+
+(defprotocol IDepth
+             (-get-depth [this]))
+
 (deftype Derived [path f
                   ^:mutable current-value
-                  ^:mutable active?
+                  ^:mutable depth
                   ^:mutable parents ^:mutable children]
          IDeref
          (-deref [this]
                  (notify-deref-watcher this)
-                 (when-not active?
-                           (-activate this))
                  current-value)
          IRefreshable
          (-refresh [this]
@@ -51,17 +65,17 @@
                (let [value (f)]
                     (when-not (= current-value value)
                               (set! current-value value)
-                              (-refresh-children this))))
+                              (enqueue-refresh children))))
          IParent
          (-add-child [this child]
                      (set! children (conj children child)))
          (-remove-child [this child]
                         (set! children (disj children child))
                         (if (= (count children) 0)
-                          (-deactivate this)))
-         (-refresh-children [this]
-                            (doseq [child children]
-                                   (-refresh child)))
+                          (-dispose this)))
+         IDepth
+         (-get-depth [this]
+                     depth)
          IChild
          (-update-parents [this new-parents]
                           (let [to-remove (set/difference parents new-parents)
@@ -71,35 +85,60 @@
                                (doseq [new-parent to-add]
                                       (bind-dependency new-parent this))))
          (-add-parent [this parent]
+                      (let [parent-depth (-get-depth parent)]
+                           (if (> parent-depth depth)
+                             (set! depth (inc parent-depth))))
                       (set! parents (conj parents parent)))
          (-remove-parent [this parent]
-                         (set! parents (disj parents parent)))
-         IActivatable
-         (-activate [this]
-                    (set! active? true)
-                    (set! parents #{})
-                    (set! children #{})
-                    (-refresh this))
-         (-deactivate [this]
-                      (-update-parents this #{})
-                      (set! active? false)
-                      (set! parents nil)
-                      (set! children nil)
-                      (set! current-value nil)))
+                         (set! parents (disj parents parent))
+                         (let [parent-depth (-get-depth parent)]
+                              (if (= (inc parent-depth) depth)
+                                (set! depth (->> (map -get-depth parents)
+                                                 (apply max)
+                                                 (inc))))))
+         IDisposable
+         (-dispose [this]
+                   (-update-parents this #{})
+                   (deactivate-signal path)
+                   (set! parents nil)
+                   (set! children nil)
+                   (set! current-value nil)))
+
+(deftype SignalRef [path]
+         IDeref
+         (-deref [this]
+                 @(path->signal path)))
+
+(deftype ManualSubscription [signal]
+         IDeref
+         (-deref [this]
+                 @signal)
+         IRefreshable
+         (-refresh [this])
+         IDepth
+         (-get-depth [this] (inc (-get-depth signal)))
+         ISubscribable
+         (-subscribe [this]
+                     (-add-child signal this))
+         (-unsubscribe [this]
+                       (-remove-child signal this)))
 
 (deftype Base [parent ^:mutable children]
          IDeref
          (-deref [this]
                  (notify-deref-watcher this)
                  @parent)
+         IDepth
+         (-get-depth [this] 0)
          IParent
          (-add-child [this child]
                      (set! children (conj children child)))
          (-remove-child [this child]
                         (set! children (disj children child)))
+         ISeed
          (-refresh-children [this]
-                            (doseq [child children]
-                                   (-refresh child))))
+                            (enqueue-refresh children)
+                            (refresh)))
 
 (defn make-base [parent]
       (let [base (Base. parent #{})]
@@ -110,7 +149,35 @@
            base))
 
 (defn make-derived [path f]
-      (Derived. path f nil false nil nil))
+      (let [derived (Derived. path f nil -1 #{} #{})]
+           (-refresh derived)
+           (activate-signal path derived)
+           derived))
+
+(defn add-refresh-queue [signal depth]
+      (if-let [depth-queue (refresh-queue depth)]
+              (set! refresh-queue
+                    (assoc refresh-queue depth (conj depth-queue signal)))
+              (set! refresh-queue
+                    (assoc refresh-queue depth #{signal}))))
+
+(defn remove-refresh-queue [signal depth]
+      (let [depth-queue (refresh-queue depth)]
+           (if (= 1 (count depth-queue))
+             (set! refresh-queue (dissoc refresh-queue depth))
+             (set! refresh-queue
+                   (assoc refresh-queue depth (disj depth-queue signal))))))
+
+(defn enqueue-refresh [signals]
+      (doseq [signal signals]
+             (add-refresh-queue signal (-get-depth signal))))
+
+(defn refresh []
+      (while (seq refresh-queue)
+             (doseq [depth-queue (vals refresh-queue)]
+                    (doseq [signal depth-queue]
+                           (remove-refresh-queue signal (-get-depth signal))
+                           (-refresh signal)))))
 
 (defn run-with-deref-capture [signal]
       (if capturing?
@@ -146,4 +213,56 @@
 (defn notify-deref-watcher [signal]
       (when capturing?
             (set! captured-parents (conj captured-parents signal))))
+
+; subscriptions
+
+(def active-signals {})
+(def default-signal-fn nil)
+(def registered-derived-signal-fns {})
+
+(defn register-derived-signal-fn [path f]
+      (set! registered-derived-signal-fns
+            (assoc-in registered-derived-signal-fns path f)))
+
+(defn register-default-signal-fn [f]
+      (set! default-signal-fn f))
+
+(defn get-in-atom-signal-fn [atom]
+      (let [base (make-base atom)]
+           (fn [path]
+               (get-in @base path))))
+
+(defn- path->derived-signal-fn [path]
+       (loop [node registered-derived-signal-fns path path]
+             (cond (map? node)
+                   (recur (node (first path)) (rest path))
+                   (ifn? node)
+                   (node path))))
+
+(defn path->signal-fn [path]
+      (if-let [f (path->derived-signal-fn path)]
+              f
+              #(default-signal-fn path)))
+
+(defn path->signal [path]
+      (if-let [signal (active-signals path)]
+              signal
+              (make-derived path (path->signal-fn path))))
+
+(defn activate-signal [path signal]
+      (set! active-signals (assoc active-signals path signal)))
+
+(defn deactivate-signal [path]
+      (set! active-signals (dissoc active-signals path)))
+
+(defn reference [path]
+      (SignalRef. path))
+
+(defn subscribe [path]
+      (let [sub (ManualSubscription. (path->signal path))]
+           (-subscribe sub)
+           sub))
+
+(defn unsubscribe [sub]
+      (-unsubscribe sub))
 
