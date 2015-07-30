@@ -2,7 +2,9 @@
   (:require [cljs.test :refer-macros [deftest is run-tests testing]]
             [reagent.core :as reagent]
             [goog.dom :as dom]
-            [sigsub.signal :as sigsub]))
+            [sigsub.core :as sigsub]))
+
+(enable-console-print!)
 
 (defn setup [db]
       (set! sigsub/active-signals {})
@@ -49,10 +51,8 @@
       (reagent/flush))
 
 (defn sum-component []
-      (println "setting sum component closure")
       (let [sum (sigsub/reagent-subscribe [:sum])]
            (fn []
-               (println "rendering sum div")
                [:div#sum @sum])))
 
 (deftest registered-derived-signal
@@ -141,6 +141,8 @@
                             (render [:div])
                             (is (active-signals-has-paths? #{}))))))
 
-(defn test []
+(defn run-all-tests []
       (run-tests))
+
+(run-all-tests)
 

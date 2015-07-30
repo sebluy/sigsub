@@ -1,33 +1,33 @@
 (defproject
   sigsub
-  "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
-  :url "http://example.com/FIXME"
+  "0.1.0"
+  :description "A signal network for supplying reagent views with data"
+  :url "http://github.com/sebluy/sigsub"
   :license {:name "MIT"}
 
   :dependencies [[org.clojure/clojure "1.7.0"]
-                 [org.clojure/clojurescript "0.0-3308" :scope "provided"]
-                 [cljsjs/react "0.13.3-1"]
+                 [org.clojure/clojurescript "0.0-3308"]
                  [reagent "0.5.0"]]
 
   :plugins [[lein-cljsbuild "1.0.5"]
             [lein-figwheel "0.3.7"]]
 
-  :hooks [leiningen.cljsbuild]
-
-  :figwheel {:http-server-root "public"
-             :nrepl-port       7888}
-
   :clean-targets ^{:protect false} ["resources/public/js"]
 
-  :cljsbuild
-  {:builds
-   {:dev
-    {:source-paths ["src" "test" "env/cljs"]
-     :compiler     {:output-to     "resources/public/js/main.js"
-                    :output-dir    "resources/public/js/out"
-                    :asset-path    "js/out"
-                    :main          "dev.env"
-                    :source-map    true
-                    :optimizations :none
-                    :pretty-print  true}}}})
+  :profiles
+  {:dev
+   {:figwheel
+    {:http-server-root "public"
+     :nrepl-port       7888}
+    :cljsbuild
+    {:builds
+     [{:id "test"
+       :source-paths ["src" "test"]
+       :figwheel     {:on-jsload "sigsub.core-test/run-all-tests"}
+       :compiler     {:main                 "sigsub.core-test"
+                      :source-map           true
+                      :source-map-timestamp true
+                      :optimizations        :none
+                      :output-to            "resources/public/js/main.js"
+                      :output-dir           "resources/public/js"
+                      :asset-path           "js"}}]}}})

@@ -1,7 +1,5 @@
-(ns sigsub.signal
+(ns sigsub.core
   (:require [clojure.set :as set]
-            [reagent.core :as core]
-            [goog.dom :as dom]
             [reagent.ratom :as reagent]))
 
 (def capturing? false)
