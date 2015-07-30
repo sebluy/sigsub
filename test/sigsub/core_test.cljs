@@ -1,5 +1,7 @@
-(ns test.sigsub.core
+(ns sigsub.core-test
   (:require [cljs.test :refer-macros [deftest is run-tests testing]]
+            [reagent.core :as reagent]
+            [goog.dom :as dom]
             [sigsub.signal :as sigsub]))
 
 (defn setup [db]
@@ -41,6 +43,17 @@
 (defn active-signals-has-paths? [paths]
       (= (into #{} paths)
          (into #{} (keys sigsub/active-signals))))
+
+(defn render [component]
+      (reagent/render component (dom/getElement "app"))
+      (reagent/flush))
+
+(defn sum-component []
+      (println "setting sum component closure")
+      (let [sum (sigsub/reagent-subscribe [:sum])]
+           (fn []
+               (println "rendering sum div")
+               [:div#sum @sum])))
 
 (deftest registered-derived-signal
          (let [db (atom {:a 1 :b 2})
@@ -111,23 +124,23 @@
                             (is (active-signals-has-paths?
                                   #{[:b] [:inc-b]}))
                             (sigsub/unsubscribe inc-b)
+                            (is (active-signals-has-paths? #{})))
+
+                   (testing "query"
+                            (is (= 9 (sigsub/query [:sum])))
+                            (is (active-signals-has-paths? #{})))
+
+                   (testing "reagent integration"
+                            (render [sum-component])
+                            (is (= (dom/getTextContent (dom/getElement "sum"))
+                                   "9"))
+                            (reset! db {:a 2 :b 6})
+                            (reagent/flush)
+                            (is (= (dom/getTextContent (dom/getElement "sum"))
+                                   "10"))
+                            (render [:div])
                             (is (active-signals-has-paths? #{}))))))
 
-#_(deftest derived-signal-computed-when-neccesary
-         (let [computed (atom 0)
-               a (atom {:important 1 :useless 2})
-               b (signal/make-base a)
-               c (signal/make-derived #(@b :important))
-               d (signal/make-derived
-                   (fn [] (swap! computed inc) (+ @c 1)))]
-              (is (= @computed 1))
-              (swap! a assoc :useless 3)
-              (is (= @computed 1))
-              (is (= @d 2))
-              (is (= @computed 1))
-              (swap! a assoc :useless 4)
-              (is (= @d 2))
-              (is (= @computed 1))))
+(defn test []
+      (run-tests))
 
-(run-tests)
-;(cljs.test/test-vars [#'test.sigsub.core/sigsub-test])

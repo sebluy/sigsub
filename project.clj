@@ -6,7 +6,9 @@
   :license {:name "MIT"}
 
   :dependencies [[org.clojure/clojure "1.7.0"]
-                 [org.clojure/clojurescript "0.0-3308"]]
+                 [org.clojure/clojurescript "0.0-3308" :scope "provided"]
+                 [cljsjs/react "0.13.3-1"]
+                 [reagent "0.5.0"]]
 
   :plugins [[lein-cljsbuild "1.0.5"]
             [lein-figwheel "0.3.7"]]
@@ -21,11 +23,11 @@
   :cljsbuild
   {:builds
    {:dev
-    {:source-paths ["src" "test"]
-     :figwheel      true
+    {:source-paths ["src" "test" "env/cljs"]
      :compiler     {:output-to     "resources/public/js/main.js"
                     :output-dir    "resources/public/js/out"
                     :asset-path    "js/out"
+                    :main          "dev.env"
                     :source-map    true
                     :optimizations :none
                     :pretty-print  true}}}})

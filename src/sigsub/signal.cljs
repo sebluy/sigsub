@@ -1,5 +1,8 @@
 (ns sigsub.signal
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [reagent.core :as core]
+            [goog.dom :as dom]
+            [reagent.ratom :as reagent]))
 
 (def capturing? false)
 (def captured-parents nil)
@@ -47,17 +50,16 @@
 (defprotocol IDepth
              (-get-depth [this]))
 
-(deftype Derived [path f
-                  ^:mutable current-value
-                  ^:mutable depth
-                  ^:mutable parents ^:mutable children]
+(deftype DerivedSignal [path f
+                        ^:mutable current-value
+                        ^:mutable depth
+                        ^:mutable parents ^:mutable children]
          IDeref
          (-deref [this]
                  (notify-deref-watcher this)
                  current-value)
          IRefreshable
          (-refresh [this]
-                   (println "Refreshing " path)
                    (let [new-parents (run-with-deref-capture this)]
                         (-update-parents this new-parents)))
          IRunnable
@@ -104,7 +106,24 @@
                    (set! children nil)
                    (set! current-value nil)))
 
-(deftype SignalRef [path]
+(deftype BaseSignal [parent ^:mutable children]
+         IDeref
+         (-deref [this]
+                 (notify-deref-watcher this)
+                 @parent)
+         IDepth
+         (-get-depth [this] 0)
+         IParent
+         (-add-child [this child]
+                     (set! children (conj children child)))
+         (-remove-child [this child]
+                        (set! children (disj children child)))
+         ISeed
+         (-refresh-children [this]
+                            (enqueue-refresh children)
+                            (refresh)))
+
+(deftype SignalReference [path]
          IDeref
          (-deref [this]
                  @(path->signal path)))
@@ -123,25 +142,33 @@
          (-unsubscribe [this]
                        (-remove-child signal this)))
 
-(deftype Base [parent ^:mutable children]
+(deftype ReagentSubscription [signal ^:mutable watches]
          IDeref
          (-deref [this]
-                 (notify-deref-watcher this)
-                 @parent)
+                 (reagent/notify-deref-watcher! this)
+                 @signal)
+         IRefreshable
+         (-refresh [this]
+                   (let [current-value @signal]
+                        (-notify-watches this
+                                         (not current-value) current-value)))
          IDepth
-         (-get-depth [this] 0)
-         IParent
-         (-add-child [this child]
-                     (set! children (conj children child)))
-         (-remove-child [this child]
-                        (set! children (disj children child)))
-         ISeed
-         (-refresh-children [this]
-                            (enqueue-refresh children)
-                            (refresh)))
+         (-get-depth [this] (inc (-get-depth signal)))
+         IWatchable
+         (-notify-watches [this oldval newval]
+                          (doseq [[key f] watches]
+                                 (f key this oldval newval)))
+         (-add-watch [this key f]
+                     (when (empty? watches)
+                           (-add-child signal this))
+                     (set! watches (assoc watches key f)))
+         (-remove-watch [this key]
+                        (set! watches (dissoc watches key))
+                        (when (empty? watches)
+                              (-remove-child signal this))))
 
 (defn make-base [parent]
-      (let [base (Base. parent #{})]
+      (let [base (BaseSignal. parent #{})]
            (-add-watch parent base
                        (fn [_ old-val new-val]
                            (if (not= old-val new-val)
@@ -149,7 +176,7 @@
            base))
 
 (defn make-derived [path f]
-      (let [derived (Derived. path f nil -1 #{} #{})]
+      (let [derived (DerivedSignal. path f nil -1 #{} #{})]
            (-refresh derived)
            (activate-signal path derived)
            derived))
@@ -201,12 +228,10 @@
                  captured))))
 
 (defn unbind-dependency [parent child]
-      (println "unbinding " (.-path parent) (.-path child))
       (-remove-parent child parent)
       (-remove-child parent child))
 
 (defn bind-dependency [parent child]
-      (println "binding " (.-path parent) (.-path child))
       (-add-parent child parent)
       (-add-child parent child))
 
@@ -256,7 +281,7 @@
       (set! active-signals (dissoc active-signals path)))
 
 (defn reference [path]
-      (SignalRef. path))
+      (SignalReference. path))
 
 (defn subscribe [path]
       (let [sub (ManualSubscription. (path->signal path))]
@@ -265,4 +290,13 @@
 
 (defn unsubscribe [sub]
       (-unsubscribe sub))
+
+(defn reagent-subscribe [path]
+      (ReagentSubscription. (path->signal path) {}))
+
+(defn query [path]
+      (let [sub (subscribe path)
+            value @sub]
+           (unsubscribe sub)
+           value))
 
