@@ -2,7 +2,7 @@
   (:require [cljs.test :refer-macros [deftest is run-tests testing]]
             [reagent.core :as reagent]
             [goog.dom :as dom]
-            [sigsub.core :as sigsub]))
+            [sigsub.core :as sigsub :include-macros :true]))
 
 (enable-console-print!)
 
@@ -30,10 +30,11 @@
 
 (defn inc-path [path count]
       (fn []
-          (let [signal (sigsub/reference path)]
-               (fn []
-                   (swap! count inc)
-                   (+ @signal 1)))))
+          (sigsub/with-signals
+            [signal path]
+            (fn []
+                (swap! count inc)
+                (+ @signal 1)))))
 
 (defn sum-paths [paths count]
       (fn []
@@ -51,9 +52,10 @@
       (reagent/flush))
 
 (defn sum-component []
-      (let [sum (sigsub/reagent-subscribe [:sum])]
-           (fn []
-               [:div#sum @sum])))
+      (sigsub/with-reagent-subs
+        [sum [:sum]]
+        (fn []
+            [:div#sum @sum])))
 
 (deftest registered-derived-signal
          (let [db (atom {:a 1 :b 2})
@@ -97,7 +99,6 @@
                             (is (= @sum-count 1))
                             (is (= @inc-a-count 1))
                             (is (= @inc-b-count 1)))
-
 
                    (testing "recomputes on dependency change"
                             (swap! db assoc :a 2)
