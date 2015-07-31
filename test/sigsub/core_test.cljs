@@ -2,13 +2,14 @@
   (:require [cljs.test :refer-macros [deftest is run-tests testing]]
             [reagent.core :as reagent]
             [goog.dom :as dom]
-            [sigsub.core :as sigsub :include-macros :true]))
+            [sigsub.core :as sigsub :include-macros :true]
+            [sigsub.signal :as signal]))
 
 (enable-console-print!)
 
 (defn setup [db]
-      (set! sigsub/active-signals {})
-      (set! sigsub/registered-derived-signal-fns {})
+      (set! signal/active-signals {})
+      (set! signal/registered-derived-signal-fns {})
       (sigsub/register-default-signal-fn
         (sigsub/get-in-atom-signal-fn db)))
 
@@ -45,7 +46,7 @@
 
 (defn active-signals-has-paths? [paths]
       (= (into #{} paths)
-         (into #{} (keys sigsub/active-signals))))
+         (into #{} (keys signal/active-signals))))
 
 (defn render [component]
       (reagent/render component (dom/getElement "app"))
@@ -56,6 +57,12 @@
         [sum [:sum]]
         (fn []
             [:div#sum @sum])))
+
+(defn other-sum-component []
+      (sigsub/with-reagent-subs
+        [sum [:sum]]
+         (fn []
+             [:div#other-sum @sum])))
 
 (deftest registered-derived-signal
          (let [db (atom {:a 1 :b 2})
@@ -129,15 +136,22 @@
 
                    (testing "query"
                             (is (= 9 (sigsub/query [:sum])))
+                            (is (= 4 @sum-count))
                             (is (active-signals-has-paths? #{})))
 
                    (testing "reagent integration"
                             (render [sum-component])
+                            (is (= 5 @sum-count))
                             (is (= (dom/getTextContent (dom/getElement "sum"))
                                    "9"))
                             (reset! db {:a 2 :b 6})
                             (reagent/flush)
+                            (is (= 6 @sum-count))
                             (is (= (dom/getTextContent (dom/getElement "sum"))
+                                   "10"))
+                            (render [other-sum-component])
+                            (is (= 6 @sum-count))
+                            (is (= (dom/getTextContent (dom/getElement "other-sum"))
                                    "10"))
                             (render [:div])
                             (is (active-signals-has-paths? #{}))))))
@@ -146,4 +160,5 @@
       (run-tests))
 
 (run-all-tests)
+
 

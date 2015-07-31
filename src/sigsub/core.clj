@@ -8,7 +8,7 @@
                     (partition 2 bindings)))))
 
 (defn- reagent-subscribe-bindings [bindings]
-  (apply-fn-to-bindings bindings 'sigsub.core/reagent-subscribe))
+  (apply-fn-to-bindings bindings 'sigsub.core/subscribe-reagent))
 
 (defn- signal-reference-bindings [bindings]
   (apply-fn-to-bindings bindings 'sigsub.core/reference))

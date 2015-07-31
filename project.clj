@@ -1,5 +1,5 @@
 (defproject
-  sigsub
+  sebluy/sigsub
   "0.1.0"
   :description "A signal network for supplying reagent views with data"
   :url "http://github.com/sebluy/sigsub"
