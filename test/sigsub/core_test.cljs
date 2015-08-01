@@ -7,7 +7,12 @@
 
 (enable-console-print!)
 
+(defn render [component]
+      (reagent/render component (dom/getElement "app"))
+      (reagent/flush))
+
 (defn setup [db]
+      (render [:div])
       (set! signal/active-signals {})
       (set! signal/registered-derived-signal-fns {})
       (sigsub/register-default-signal-fn
@@ -48,10 +53,6 @@
       (= (into #{} paths)
          (into #{} (keys signal/active-signals))))
 
-(defn render [component]
-      (reagent/render component (dom/getElement "app"))
-      (reagent/flush))
-
 (defn sum-component []
       (sigsub/with-reagent-subs
         [sum [:sum]]
@@ -63,6 +64,16 @@
         [sum [:sum]]
          (fn []
              [:div#other-sum @sum])))
+
+(defn cond-component []
+      (sigsub/with-reagent-subs
+        [inc-a [:inc-a]
+         inc-b [:inc-b]]
+        (fn []
+            [:div#cond
+             (if (= @inc-a 1)
+               @inc-a
+               @inc-b)])))
 
 (deftest registered-derived-signal
          (let [db (atom {:a 1 :b 2})
@@ -153,6 +164,15 @@
                             (is (= 6 @sum-count))
                             (is (= (dom/getTextContent (dom/getElement "other-sum"))
                                    "10"))
+                            (println "Rending cond")
+                            (render [cond-component])
+                            (is (= "7" (dom/getTextContent (dom/getElement "cond"))))
+                            (reset! db {:a 0 :b 5})
+                            (reagent/flush)
+                            (is (= "1" (dom/getTextContent (dom/getElement "cond"))))
+                            (reset! db {:a 1 :b 4})
+                            (reagent/flush)
+                            (is (= "5" (dom/getTextContent (dom/getElement "cond"))))
                             (render [:div])
                             (is (active-signals-has-paths? #{}))))))
 

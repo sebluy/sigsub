@@ -8,10 +8,12 @@
 (declare add-reagent-pending)
 (declare remove-reagent-pending)
 
-(deftype ReagentSubscription [signal ^:mutable watches]
+(deftype ReagentSubscription [path ^:mutable signal ^:mutable watches]
          IDeref
          (-deref [this]
                  (reagent/notify-deref-watcher! this)
+                 (when (nil? signal)
+                   (set! signal (signal/path->signal path)))
                  @signal)
          signal/IRefreshable
          (-refresh [this]
@@ -26,28 +28,25 @@
                                  (f key this oldval newval)))
          (-add-watch [this key f]
                      (when (empty? watches)
-                           (remove-reagent-pending this)
                            (signal/-add-child signal this))
                      (set! watches (assoc watches key f)))
          (-remove-watch [this key]
                         (set! watches (dissoc watches key))
                         (when (empty? watches)
-                              (add-reagent-pending this))))
+                              (add-reagent-pending [signal this]))))
 
 (defn- add-reagent-pending [sub]
-      (set! reagent-pending (conj reagent-pending sub)))
-
-(defn- remove-reagent-pending [sub]
-      (set! reagent-pending (disj reagent-pending sub)))
+       (set! reagent-pending (conj reagent-pending sub)))
 
 (defn- reagent-batch-deactivate []
-      (doseq [sub reagent-pending]
-             (signal/-remove-child (.-signal sub) sub))
-      (set! reagent-pending #{}))
+       (doseq [[signal sub] reagent-pending]
+              (set! (.-signal sub) nil)
+              (signal/-remove-child signal sub))
+       (set! reagent-pending #{}))
 
 (defn- reagent-deactivate-flush-loop []
-      (reagent-batch-deactivate)
-      (reagent-batching/do-after-flush reagent-deactivate-flush-loop))
+       (reagent-batch-deactivate)
+       (reagent-batching/do-after-flush reagent-deactivate-flush-loop))
 
 (reagent-batching/do-after-flush reagent-deactivate-flush-loop)
 

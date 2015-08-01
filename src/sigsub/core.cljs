@@ -10,7 +10,6 @@
                              (signal/-refresh-children base))))
            base))
 
-
 (defn register-derived-signal-fn [path f]
       (set! signal/registered-derived-signal-fns
             (assoc-in signal/registered-derived-signal-fns path f)))
@@ -27,7 +26,7 @@
        (signal/SignalReference. path))
 
 (defn subscribe-reagent [path]
-       (reagent/ReagentSubscription. (signal/path->signal path) {}))
+       (reagent/ReagentSubscription. path nil {}))
 
 (defn subscribe [path]
       (let [sub (signal/ManualSubscription. (signal/path->signal path))]

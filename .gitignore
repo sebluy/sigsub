@@ -5,6 +5,7 @@
 pom.xml
 pom.xml.asc
 *.iml
+sigsub.iml
 *.jar
 *.class
 /.lein-*

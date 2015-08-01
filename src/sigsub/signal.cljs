@@ -1,6 +1,8 @@
 (ns sigsub.signal
   (:require [clojure.set :as set]))
 
+(declare js->str)
+
 (defonce capturing? false)
 (defonce captured-parents nil)
 (defonce signal-being-captured nil)
@@ -229,7 +231,4 @@
 
 (defn- deactivate-signal [path]
       (set! active-signals (dissoc active-signals path)))
-
-(defn- reference [path]
-      (SignalReference. path))
 
