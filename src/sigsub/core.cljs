@@ -10,23 +10,33 @@
                              (signal/-refresh-children base))))
            base))
 
-(defn register-derived-signal-fn [path f]
-      (set! signal/registered-derived-signal-fns
-            (assoc-in signal/registered-derived-signal-fns path f)))
+(defn nop-deactivate []
+      (fn []))
 
-(defn register-default-signal-fn [f]
-      (set! signal/default-signal-fn f))
+(defn register-signal-skeleton
+      ([path run-fn] (register-signal-skeleton path run-fn nop-deactivate))
+      ([path run-fn deactivate-fn]
+        (set! signal/registered-skeletons
+              (assoc-in signal/registered-skeletons path
+                        (signal/SignalSkeleton. run-fn deactivate-fn nil)))))
 
-(defn get-in-atom-signal-fn [atom]
+(defn register-default-signal-skeleton
+      ([run-fn] (register-default-signal-skeleton run-fn nop-deactivate))
+      ([run-fn deactivate-fn]
+        (set! signal/default-skeleton
+              (signal/SignalSkeleton. run-fn deactivate-fn nil))))
+
+(defn get-in-atom-run-fn [atom]
       (let [base (make-base atom)]
            (fn [path]
-               (get-in @base path))))
+               (fn []
+                   (get-in @base path)))))
 
-(defn- reference [path]
-       (signal/SignalReference. path))
+(defn- reference [path-fn]
+       (signal/SignalReference. path-fn))
 
-(defn subscribe-reagent [path]
-       (reagent/ReagentSubscription. path nil {}))
+(defn subscribe-reagent [path-fn]
+       (reagent/ReagentSubscription. path-fn nil nil {}))
 
 (defn subscribe [path]
       (let [sub (signal/ManualSubscription. (signal/path->signal path))]

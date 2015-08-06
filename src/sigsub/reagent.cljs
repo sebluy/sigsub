@@ -8,12 +8,19 @@
 (declare add-reagent-pending)
 (declare remove-reagent-pending)
 
-(deftype ReagentSubscription [path ^:mutable signal ^:mutable watches]
+(deftype ReagentSubscription [path-fn ^:mutable path
+                              ^:mutable signal ^:mutable watches]
          IDeref
          (-deref [this]
                  (reagent/notify-deref-watcher! this)
-                 (when (nil? signal)
-                   (set! signal (signal/path->signal path)))
+                 (let [new-path (path-fn)]
+                      (cond (nil? signal)
+                            (set! signal (signal/path->signal new-path))
+                            (not= new-path path)
+                            (do (signal/-remove-child signal this)
+                                (set! signal (signal/path->signal new-path))
+                                (signal/-add-child signal this)))
+                      (set! path new-path))
                  @signal)
          signal/IRefreshable
          (-refresh [this]

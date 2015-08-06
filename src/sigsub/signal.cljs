@@ -8,9 +8,10 @@
 (defonce signal-being-captured nil)
 (defonce refresh-queue (sorted-map))
 
+
 (defonce active-signals {})
-(defonce default-signal-fn nil)
-(defonce registered-derived-signal-fns {})
+(defonce default-skeleton nil)
+(defonce registered-skeletons {})
 
 (declare path->signal)
 
@@ -24,6 +25,8 @@
 
 (declare activate-signal)
 (declare deactivate-signal)
+
+(defrecord SignalSkeleton [run-fn deactivate-fn args])
 
 (defprotocol IParent
              (-add-child [this child])
@@ -43,9 +46,6 @@
 (defprotocol IRefreshable
              (-refresh [this]))
 
-(defprotocol IDisposable
-             (-dispose [this]))
-
 (defprotocol ISubscribable
              (-subscribe [this])
              (-unsubscribe [this]))
@@ -53,7 +53,11 @@
 (defprotocol IDepth
              (-get-depth [this]))
 
-(deftype DerivedSignal [path f
+(defprotocol IDeactivatable
+             (-deactivate [this]))
+
+
+(deftype DerivedSignal [path run-fn deactivate-fn
                         ^:mutable current-value
                         ^:mutable depth
                         ^:mutable parents ^:mutable children]
@@ -67,7 +71,7 @@
                         (-update-parents this new-parents)))
          IRunnable
          (-run [this]
-               (let [value (f)]
+               (let [value (run-fn)]
                     (when-not (= current-value value)
                               (set! current-value value)
                               (enqueue-refresh children))))
@@ -77,7 +81,7 @@
          (-remove-child [this child]
                         (set! children (disj children child))
                         (if (= (count children) 0)
-                          (-dispose this)))
+                          (-deactivate this)))
          IDepth
          (-get-depth [this]
                      depth)
@@ -101,13 +105,14 @@
                                 (set! depth (->> (map -get-depth parents)
                                                  (apply max)
                                                  (inc))))))
-         IDisposable
-         (-dispose [this]
-                   (-update-parents this #{})
-                   (deactivate-signal path)
-                   (set! parents nil)
-                   (set! children nil)
-                   (set! current-value nil)))
+         IDeactivatable
+         (-deactivate [this]
+                      (-update-parents this #{})
+                      (deactivate-fn)
+                      (deactivate-signal path)
+                      (set! parents nil)
+                      (set! children nil)
+                      (set! current-value nil)))
 
 (deftype BaseSignal [parent ^:mutable children]
          IDeref
@@ -126,10 +131,10 @@
                             (enqueue-refresh children)
                             (refresh)))
 
-(deftype SignalReference [path]
+(deftype SignalReference [path-fn]
          IDeref
          (-deref [this]
-                 @(path->signal path)))
+                 @(path->signal (path-fn))))
 
 (deftype ManualSubscription [signal]
          IDeref
@@ -145,90 +150,95 @@
          (-unsubscribe [this]
                        (-remove-child signal this)))
 
-(defn- make-derived [path f]
-      (let [derived (DerivedSignal. path f nil -1 #{} #{})]
-           (-refresh derived)
-           (activate-signal path derived)
-           derived))
+
 
 (defn- add-refresh-queue [signal depth]
-      (if-let [depth-queue (refresh-queue depth)]
-              (set! refresh-queue
-                    (assoc refresh-queue depth (conj depth-queue signal)))
-              (set! refresh-queue
-                    (assoc refresh-queue depth #{signal}))))
+       (if-let [depth-queue (refresh-queue depth)]
+               (set! refresh-queue
+                     (assoc refresh-queue depth (conj depth-queue signal)))
+               (set! refresh-queue
+                     (assoc refresh-queue depth #{signal}))))
 
 (defn- remove-refresh-queue [signal depth]
-      (let [depth-queue (refresh-queue depth)]
-           (if (= 1 (count depth-queue))
-             (set! refresh-queue (dissoc refresh-queue depth))
-             (set! refresh-queue
-                   (assoc refresh-queue depth (disj depth-queue signal))))))
+       (let [depth-queue (refresh-queue depth)]
+            (if (= 1 (count depth-queue))
+              (set! refresh-queue (dissoc refresh-queue depth))
+              (set! refresh-queue
+                    (assoc refresh-queue depth (disj depth-queue signal))))))
 
 (defn- enqueue-refresh [signals]
-      (doseq [signal signals]
-             (add-refresh-queue signal (-get-depth signal))))
+       (doseq [signal signals]
+              (add-refresh-queue signal (-get-depth signal))))
 
 (defn- refresh []
-      (while (seq refresh-queue)
-             (doseq [depth-queue (vals refresh-queue)]
-                    (doseq [signal depth-queue]
-                           (remove-refresh-queue signal (-get-depth signal))
-                           (-refresh signal)))))
+       (while (seq refresh-queue)
+              (doseq [depth-queue (vals refresh-queue)]
+                     (doseq [signal depth-queue]
+                            (remove-refresh-queue signal (-get-depth signal))
+                            (-refresh signal)))))
 
 (defn- run-with-deref-capture [signal]
-      (if capturing?
-        (let [child signal-being-captured
-              childs-captured captured-parents]
-             (set! captured-parents #{})
+       (if capturing?
+         (let [child signal-being-captured
+               childs-captured captured-parents]
+              (set! captured-parents #{})
+              (set! signal-being-captured signal)
+              (-run signal)
+              (set! signal-being-captured child)
+              (let [captured captured-parents]
+                   (set! captured-parents childs-captured)
+                   captured))
+         (do (set! captured-parents #{})
              (set! signal-being-captured signal)
+             (set! capturing? true)
              (-run signal)
-             (set! signal-being-captured child)
+             (set! capturing? false)
+             (set! signal-being-captured nil)
              (let [captured captured-parents]
-                  (set! captured-parents childs-captured)
-                  captured))
-        (do (set! captured-parents #{})
-            (set! signal-being-captured signal)
-            (set! capturing? true)
-            (-run signal)
-            (set! capturing? false)
-            (set! signal-being-captured nil)
-            (let [captured captured-parents]
-                 (set! captured-parents nil)
-                 captured))))
+                  (set! captured-parents nil)
+                  captured))))
 
 (defn- unbind-dependency [parent child]
-      (-remove-parent child parent)
-      (-remove-child parent child))
+       (-remove-parent child parent)
+       (-remove-child parent child))
 
 (defn- bind-dependency [parent child]
-      (-add-parent child parent)
-      (-add-child parent child))
+       (-add-parent child parent)
+       (-add-child parent child))
 
 (defn- notify-deref-watcher [signal]
-      (when capturing?
-            (set! captured-parents (conj captured-parents signal))))
+       (when capturing?
+             (set! captured-parents (conj captured-parents signal))))
 
-(defn- path->derived-signal-fn [path]
-       (loop [node registered-derived-signal-fns path path]
-             (cond (map? node)
-                   (recur (node (first path)) (rest path))
-                   (ifn? node)
-                   (node path))))
+(defn- path->registered-skeleton [path]
+       (loop [node registered-skeletons path path]
+             (cond (= (type node) `~SignalSkeleton)
+                   (assoc node :args path)
+                   (map? node)
+                   (recur (node (first path)) (rest path)))))
 
-(defn- path->signal-fn [path]
-      (if-let [f (path->derived-signal-fn path)]
-              f
-              #(default-signal-fn path)))
+(defn- path->skeleton [path]
+       (if-let [skeleton (path->registered-skeleton path)]
+               skeleton
+               (assoc default-skeleton :args path)))
+
+(defn- roust-skeleton [path]
+       (let [skeleton (path->skeleton path)
+             run-fn ((:run-fn skeleton) (:args skeleton))
+             deactivate-fn ((:deactivate-fn skeleton) (:args skeleton))
+             derived (DerivedSignal. path run-fn deactivate-fn nil -1 #{} #{})]
+            (-refresh derived)
+            (activate-signal path derived)
+            derived))
 
 (defn- path->signal [path]
-      (if-let [signal (active-signals path)]
-              signal
-              (make-derived path (path->signal-fn path))))
+       (if-let [signal (active-signals path)]
+               signal
+               (roust-skeleton path)))
 
 (defn- activate-signal [path signal]
-      (set! active-signals (assoc active-signals path signal)))
+       (set! active-signals (assoc active-signals path signal)))
 
 (defn- deactivate-signal [path]
-      (set! active-signals (dissoc active-signals path)))
+       (set! active-signals (dissoc active-signals path)))
 
