@@ -1,7 +1,5 @@
 Todo:
-Fix this hairball
-Rethink path & args to subs
-Add dispose
+Clean up this hairball
 
 Dependent signals must be dereferenced immedeately upon function call.
 Lazily evaluated signals will not build dependencies properly.

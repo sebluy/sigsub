@@ -1,6 +1,6 @@
 (defproject
   sebluy/sigsub
-  "0.1.1"
+  "0.1.2"
   :description "A signal network for supplying reagent views with data"
   :url "http://github.com/sebluy/sigsub"
   :license {:name "MIT"}
