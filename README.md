@@ -43,10 +43,11 @@ Derived data:
 
 (sigsub/register-signal-skeleton
   [:inc-a] ;<= path
-  (sigsub/with-signals
-    [a [:a]] ;<= dependency
-    (fn []  
-      (inc @a)))) ;<= functional relationship
+  (fn []
+    (sigsub/with-signals
+      [a [:a]] ;<= dependency
+      (fn []  
+        (inc @a))))) ;<= functional relationship
 
 (defn inc-a-component []
   (sigsub/with-reagent-subs
@@ -60,6 +61,53 @@ Derived data:
 
 ;;=> renders [:div 3]
 
+```
+
+Passing arguments through path:
+
+```clj
+
+(reset! db {:a 1})
+
+(sigsub/register-signal-skeleton
+  [:a-plus] ;<= path
+  (fn [[x]] ;<= arguments 
+    (sigsub/with-signals
+      [a [:a]] ;<= dependency
+      (fn []
+        (+ @a x)))) ;<= functional relationship
+
+(defn a-plus-component []
+  (sigsub/with-reagent-subs
+    [a-plus-five [:a-plus 5]]
+    (fn []
+      [:div @a-plus-five])))
+
+;;=> renders [:div 6]
+
+(swap! db assoc :a 2)
+
+;;=> renders [:div 7]
+```
+
+With path dependent on signal:
+
+```clj
+
+(reset! db {:a 1 :b 2})
+
+(defn a-plus-b-component []
+  (sigsub/with-reagent-subs
+    [b           [:b]
+     a-plus-b    [:a-plus @b]]
+    (fn []
+      [:div @a-plus-b])))
+
+;;=> renders [:div 3]
+
+(swap! db assoc :a 2)
+
+;;=> renders [:div 4]
 ```
 
 See [tests](https://github.com/sebluy/sigsub/blob/master/test/sigsub/core_test.cljs) for more examples.
