@@ -1,13 +1,10 @@
 (ns sigsub.signal
   (:require [clojure.set :as set]))
 
-(declare js->str)
-
 (defonce capturing? false)
 (defonce captured-parents nil)
 (defonce signal-being-captured nil)
 (defonce refresh-queue (sorted-map))
-
 
 (defonce active-signals {})
 (defonce default-skeleton nil)
@@ -56,7 +53,10 @@
 (defprotocol IDeactivatable
              (-deactivate [this]))
 
-
+; differences between reagent.ratom/Reaction
+; - breadth first signal propagation (instead of depth first)
+;     to avoid redundant recomputations
+; - recomputes on = (instead of identical?)
 (deftype DerivedSignal [path run-fn deactivate-fn
                         ^:mutable current-value
                         ^:mutable depth
@@ -108,7 +108,7 @@
          IDeactivatable
          (-deactivate [this]
                       (-update-parents this #{})
-                      (deactivate-fn)
+                      (deactivate-fn))
                       (deactivate-signal path)
                       (set! parents nil)
                       (set! children nil)
@@ -149,8 +149,6 @@
                      (-add-child signal this))
          (-unsubscribe [this]
                        (-remove-child signal this)))
-
-
 
 (defn- add-refresh-queue [signal depth]
        (if-let [depth-queue (refresh-queue depth)]
