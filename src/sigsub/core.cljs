@@ -1,5 +1,6 @@
 (ns sigsub.core
-  (:require [sigsub.signal :as signal]))
+  (:require [sigsub.signal :as signal]
+            [sigsub.reagent :as reagent]))
 
 (defn make-base [parent]
       "Wraps an IWatchable and IDerefable (e.g. atom) object with a BaseSignal, which
@@ -13,7 +14,7 @@
            base))
 
 (defn- nop-deactivate []
-      (fn []))
+       (fn []))
 
 (defn register-signal-skeleton
       "Registers a mapping from path to signal skeleton.
@@ -66,13 +67,12 @@
       new signal. This is neccesary because these references are created to
       track dependent signals, which may deactivate and activate as different
       instances as needed."
-      reactivated
-       (signal/SignalReference. path-fn))
+      (signal/SignalReference. path-fn))
 
 (defn subscribe-reagent [path-fn]
       "Creates a subscription that can bind to a reagent.ratom/Reaction.
       Paths are wrapped in fns so they can be dependent on other signals."
-       (reagent/ReagentSubscription. path-fn nil nil {}))
+      (reagent/ReagentSubscription. path-fn nil nil {}))
 
 (defn subscribe [path]
       "Creates a manual subscription to a signal. The signal is creating using

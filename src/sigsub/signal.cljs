@@ -108,7 +108,7 @@
          IDeactivatable
          (-deactivate [this]
                       (-update-parents this #{})
-                      (deactivate-fn))
+                      (deactivate-fn)
                       (deactivate-signal path)
                       (set! parents nil)
                       (set! children nil)

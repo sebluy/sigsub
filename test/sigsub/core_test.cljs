@@ -242,3 +242,5 @@
 (defn run-all-tests []
       (run-tests))
 
+(run-all-tests)
+
